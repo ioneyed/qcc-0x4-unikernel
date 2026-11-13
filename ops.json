@@ -1,0 +1,10 @@
+{
+  "Env": {
+    "DEMO_UNSAFE": "1",
+    "PORT": "${DEMO_PORT}"
+  },
+  "RunConfig": {
+    "CPUs": 1,
+    "Memory": "128M"
+  }
+}
