@@ -12,7 +12,7 @@ BINARY := build/vulnapp
 help:
 	@echo "Unikernel conference demo"
 	@echo ""
-	@echo "  make check           verify Go, QEMU, and Ops"
+	@echo "  make check           verify Go, QEMU, Ops, and lsof"
 	@echo "  make test            run the Go tests"
 	@echo "  make run-native      run the vulnerable app on the host"
 	@echo "  make image           build a bootable Nanos image"
@@ -28,11 +28,19 @@ test:
 check:
 	@command -v $(GO) >/dev/null || { echo "missing: go"; exit 1; }
 	@command -v $(OPS) >/dev/null || { echo "missing: ops"; exit 1; }
+	@command -v lsof >/dev/null || { echo "missing: lsof (Ops uses it to check forwarded ports)"; exit 1; }
+	@ops_path=$$(command -v $(OPS)); \
+	grep -a -q ops_render_config "$$ops_path" || { \
+		echo "This Ops binary does not support config interpolation: $$ops_path"; \
+		echo "Ops 0.1.35 or newer is required. Install it with: curl https://ops.city/get.sh -sSfL | sh"; \
+		exit 1; \
+	}
 	@if [ "$(ARCH)" = "arm64" ]; then qemu=qemu-system-aarch64; else qemu=qemu-system-x86_64; fi; \
 	command -v $$qemu >/dev/null || { echo "missing: $$qemu"; exit 1; }; \
 	echo "Go:   $$($(GO) version)"; \
 	echo "QEMU: $$($$qemu --version | head -n 1)"; \
 	echo "Ops:  $$(command -v $(OPS))"; \
+	echo "lsof: $$(command -v lsof)"; \
 	echo "arch: $(ARCH)"
 
 run-native: build

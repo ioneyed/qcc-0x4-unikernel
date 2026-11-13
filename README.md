@@ -35,21 +35,23 @@ On Linux, both runs use the exact same `build/vulnapp` ELF. On macOS, the native
 
 ## Install prerequisites
 
-You need Go 1.22 or newer, Make, QEMU 7 or newer, and Ops. Ops uses QEMU's user-mode networking for this local demo and forwards host port 8080 to the unikernel.
+You need Go 1.22 or newer, Make, QEMU 7 or newer, Ops 0.1.35 or newer, and `lsof`. Ops 0.1.35 introduced the config interpolation used for dynamic ports. Ops calls `lsof` before launch to check forwarded ports, then uses QEMU's user-mode networking to forward the selected host port to the unikernel.
 
 ### NixOS / Nix
 
-The included flake supplies everything:
+The included flake supplies Go, Make, QEMU, `curl`, and `lsof`. Install current Ops separately because the nixpkgs package is still 0.1.32 and does not support config interpolation:
 
 ```sh
+curl https://ops.city/get.sh -sSfL | sh
+export PATH="$HOME/.ops/bin:$PATH"
 nix develop
 make check
 ```
 
-Or install the tools into your profile:
+Or install the non-Ops tools into your profile:
 
 ```sh
-nix profile install nixpkgs#go nixpkgs#gnumake nixpkgs#qemu nixpkgs#ops
+nix profile install nixpkgs#go nixpkgs#gnumake nixpkgs#qemu nixpkgs#lsof
 ```
 
 ### macOS (Homebrew)
@@ -60,13 +62,13 @@ brew tap nanovms/homebrew-ops
 brew install nanovms/ops/ops
 ```
 
-Both Intel and Apple Silicon work. The Makefile builds for the host architecture so Ops can use hardware acceleration.
+macOS includes `lsof` in `/usr/sbin`; make sure that directory is on `PATH`. Both Intel and Apple Silicon work. The Makefile builds for the host architecture so Ops can use hardware acceleration.
 
 ### Debian / Ubuntu
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential curl golang-go qemu-kvm qemu-utils
+sudo apt-get install -y build-essential curl golang-go lsof qemu-kvm qemu-utils
 curl https://ops.city/get.sh -sSfL | sh
 ```
 
@@ -75,7 +77,7 @@ If your distribution's `golang-go` is older than 1.22, install a current release
 ### Fedora
 
 ```sh
-sudo dnf install -y @development-tools curl golang qemu-kvm qemu-img
+sudo dnf install -y @development-tools curl golang lsof qemu-kvm qemu-img
 curl https://ops.city/get.sh -sSfL | sh
 ```
 
@@ -95,14 +97,22 @@ On macOS, QEMU uses Apple's Hypervisor Framework. Ops prints a warning if accele
 
 | Command | Purpose |
 | --- | --- |
-| `make check` | Verify Go, the architecture-appropriate QEMU executable, and Ops |
+| `make check` | Verify Go, the architecture-appropriate QEMU executable, Ops, and `lsof` |
 | `make test` | Test the app and confirm unsafe endpoints are off by default |
 | `make build` | Produce a stripped, static Linux ELF at `build/vulnapp` |
 | `make run-native` | Run the host comparison with vulnerabilities enabled |
 | `make image` | Create a bootable Nanos image without launching it |
 | `make run-unikernel` | Build and boot the image, forwarding port 8080 |
 
-Override the demo port with `make run-native PORT=9090` and then `make run-unikernel PORT=9090`. The Makefile renders the value into `ops.json` so the host forwarding and guest listener stay aligned.
+Override both native and unikernel ports when needed:
+
+```sh
+make run-native PORT=9090
+# Stop it with Ctrl-C before launching the unikernel.
+make run-unikernel PORT=9090
+```
+
+The Makefile exports `DEMO_PORT` and enables Ops's native renderer with `ops_render_config=true`. Ops expands `${DEMO_PORT}` in `ops.json`, while `-p` receives the same value for host forwarding.
 
 ## What the demo proves—and what it does not
 
@@ -119,13 +129,17 @@ That distinction is the key line for the talk: **a unikernel complements secure 
 
 ## How it works
 
-`make build` sets `CGO_ENABLED=0` and `GOOS=linux`, producing the standalone ELF format Ops expects. `ops.json` enables the intentionally vulnerable routes inside the guest and allocates one CPU with 128 MiB RAM. `ops run -p 8080` builds a Nanos disk image, starts QEMU, and configures local port forwarding. Ops config rendering keeps the guest port aligned when `PORT` is overridden.
+`make build` sets `CGO_ENABLED=0` and `GOOS=linux`, producing the standalone ELF format Ops expects. `ops.json` enables the intentionally vulnerable routes, uses Ops-native interpolation for the selected listener port, and allocates one CPU with 128 MiB RAM. `ops run -p PORT` uses the same value before Ops starts QEMU.
 
 The application limits file and command output to 64 KiB and command runtime to two seconds so a typo is less likely to derail a live demo. It is still intentionally unsafe.
 
 ## Troubleshooting
 
 **The first run appears stuck:** Ops may be downloading Nanos. Wait for the download and boot messages; pre-warm it before the talk.
+
+**`exec: "lsof": executable file not found`:** enter the Nix shell with `nix develop`, or install `lsof` using the platform command above. Ops requires it even when the port is free.
+
+**The guest logs `lookup tcp/${DEMO_PORT}: unknown port`:** `ops_render_config` was ignored. Run `ops version`; versions before 0.1.35 do not implement interpolation. Install the current release and ensure `$HOME/.ops/bin` appears before an older system or nixpkgs package on `PATH`.
 
 **Port 8080 is already in use:** stop the native app before starting the unikernel. Find listeners with `lsof -i :8080` (macOS) or `ss -ltnp 'sport = :8080'` (Linux).
 
